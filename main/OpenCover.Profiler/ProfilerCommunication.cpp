@@ -187,7 +187,10 @@ namespace Communication
 		return true;
 	}
 
-	bool ProfilerCommunication::Initialise(TCHAR *key, TCHAR *ns, TCHAR *processName)
+	bool ProfilerCommunication::Initialise(
+		TCHAR *key, TCHAR *ns, 
+		TCHAR *processName, 
+		bool safe_mode, int sendVisitPointsTimerInterval)
 	{
 		_key = key;
 		_processName = processName;
@@ -212,6 +215,11 @@ namespace Communication
 
 		if (!InitializeBufferSynchronization(resource_name)) 
 			return false;
+		
+		_sendTimer.Start([=]()
+		{
+			SendRemainingVisitPoints(safe_mode);
+		}, sendVisitPointsTimerInterval);
 
 		return _hostCommunicationActive;
 	}
@@ -257,6 +265,14 @@ namespace Communication
 				SendThreadVisitPoints(it->second);
 			}
 		}
+	}
+
+	void ProfilerCommunication::SendRemainingVisitPoints(bool safemode)
+	{
+		if (safemode)
+			SendVisitPoints();
+		else
+			SendRemainingThreadBuffers();
 	}
 
 	void ProfilerCommunication::AddVisitPointToThreadBuffer(ULONG uniqueId, MSG_IdType msgType)
@@ -326,6 +342,8 @@ namespace Communication
 		if (!_hostCommunicationActive)
 			return;
 		try {
+			ATLTRACE("ProfilerCommunication : Flushing visit points to host\n");
+
 			_memoryResults.FlushViewOfFile();
 
 			DWORD dwSignal = _eventProfilerHasResults.SignalAndWait(_eventResultsHaveBeenReceived, _short_wait);
@@ -519,6 +537,9 @@ namespace Communication
 	}
 
 	void ProfilerCommunication::CloseChannel(bool sendSingleBuffer) {
+
+		_sendTimer.Stop();
+
 		if (_bufferId == 0)
 			return;
 
@@ -528,10 +549,7 @@ namespace Communication
 		if (!TestSemaphore(_semapore_results))
 			return;
 
-		if (sendSingleBuffer)
-			SendVisitPoints();
-		else
-			SendRemainingThreadBuffers();
+		SendRemainingVisitPoints(sendSingleBuffer);
 
 		if (!_hostCommunicationActive)
 			return;
@@ -583,11 +601,13 @@ namespace Communication
 
 	void ProfilerCommunication::report_runtime(const std::runtime_error& re, const tstring &msg) const {
 		USES_CONVERSION;
+#pragma warning (suppress : 6255) // can't fix ATL macro
 		RELTRACE(_T("Runtime error: %s - %s"), msg.c_str(), A2T(re.what()));
 	}
 
 	void ProfilerCommunication::report_exception(const std::exception& re, const tstring &msg) const {
 		USES_CONVERSION;
+#pragma warning (suppress : 6255) // can't fix ATL macro
 		RELTRACE(_T("Error occurred: %s - %s"), msg.c_str(), A2T(re.what()));
 	}
 
@@ -598,7 +618,7 @@ namespace Communication
 		}
 		__except (GetExceptionCode() == EXCEPTION_IN_PAGE_ERROR ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH)
 		{
-			RELTRACE(_T("SEH exception failure occured: %s - %d"),
+			RELTRACE(_T("SEH exception failure occurred: %s - %d"),
 				message.c_str(), GetExceptionCode());
 		}
 	}
@@ -627,7 +647,7 @@ namespace Communication
 		catch (...)
 		{
 			// catch any other errors (that we have no information about)
-			RELTRACE(_T("Unknown failure occured. Possible memory corruption - %s"), message.c_str());
+			RELTRACE(_T("Unknown failure occurred. Possible memory corruption - %s"), message.c_str());
 			throw;
 		}
 	}

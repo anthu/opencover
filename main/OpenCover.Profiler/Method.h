@@ -55,6 +55,8 @@ namespace Instrumentation
 
 		void ConvertShortBranches();
 		void ResolveBranches();
+		void DumpExceptionFilters();
+		void DumpInstructions();
 		Instruction * GetInstructionAtOffset(long offset);
 		Instruction * GetInstructionAtOffset(long offset, bool isFinally, bool isFault, bool isFilter, bool isTyped);
 		void ReadSections();
@@ -73,12 +75,22 @@ namespace Instrumentation
 
 #ifdef TEST_FRAMEWORK
 	public:
+		ExceptionHandlerList m_exceptions;
 #else
 	private:
-#endif
 		ExceptionHandlerList m_exceptions;
-
+#endif
 	public:
 		InstructionList m_instructions;
+
+		int GetNumberOfInstructions() const
+		{
+			return static_cast<int>(m_instructions.size());
+		}
+
+		int GetNumberOfExceptions() const
+		{
+			return static_cast<int>(m_exceptions.size());
+		}
 	};
 }

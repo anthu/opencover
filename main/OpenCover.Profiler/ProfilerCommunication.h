@@ -8,6 +8,7 @@
 #include "Synchronization.h"
 #include "SharedMemory.h"
 #include "Messages.h"
+#include "Timer.h"
 
 #include <exception>
 
@@ -23,8 +24,12 @@ namespace Communication
 
 	public:
 		ProfilerCommunication(DWORD short_wait, DWORD version_high, DWORD version_low);
+		
+		
+		bool Initialise(
+			TCHAR* key, TCHAR *ns, TCHAR *processName, 
+			bool safe_mode, int sendVisitPointsTimerInterval);
 
-		~ProfilerCommunication() {}
 		bool Initialise(TCHAR* key, TCHAR *ns, TCHAR *processName);
 
 	public:
@@ -56,6 +61,7 @@ namespace Communication
 		void SendThreadVisitPointsInternal(MSG_SendVisitPoints_Request* pVisitPoints);
 		bool GetSequencePoints(mdToken functionToken, WCHAR* pModulePath, WCHAR* pAssemblyName, std::vector<SequencePoint> &points);
 		bool GetBranchPoints(mdToken functionToken, WCHAR* pModulePath, WCHAR* pAssemblyName, std::vector<BranchPoint> &points);
+		void SendRemainingVisitPoints(bool safemode);
 		void SendRemainingThreadBuffers();
 		MSG_SendVisitPoints_Request* AllocateVisitMap(DWORD osThreadID);
 
@@ -123,6 +129,7 @@ namespace Communication
 	private:
 		DWORD _version_high;
 		DWORD _version_low;
+		Timer _sendTimer;
 
 	private:
 

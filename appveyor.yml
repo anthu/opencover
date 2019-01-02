@@ -1,6 +1,6 @@
-version: 4.6.{build}
+version: 4.7.{build}
 skip_tags: true
-os: Visual Studio 2015
+image: Visual Studio 2017
 shallow_clone: true
 environment:
   COVERALLS_REPO_TOKEN:
@@ -10,7 +10,7 @@ environment:
   COVERITY_EMAIL:
     secure: lgy4M/uQ9jMlxmPzTIYWVE2GggvPntq6kfpO6Z0pjAs=
   SONARQUBE_TOKEN:
-    secure: DSwAr4fYt3Q35Sjob5qAN5ujYqFCPZQguJ2yhI3IN46AIK63sRLhpamof6BZr9lx
+    secure: WRLqxS8frIuLNHeSMOj6SXvR3S0gx3RM0bgGkWeglXMIPSVS/VNmfUEqdHYZ2QOB
   DRDUMP_TOKEN:
     secure: 16PEs46poxfT7drt6BdHSHPPzAymXBYrIaqoAsHvY49os5Azz4rNTp3QaUhtITZ+
 cache:
@@ -20,19 +20,29 @@ nuget:
   disable_publish_on_pr: true
 install:
 - ps: >-
-    cmd /c rd /s /q "C:\Program Files\dotnet\sdk\1.0.1"
-    
-    Write-Host 'Downloading Microsoft .NET Framework 4.6.2 Developer Pack...'
+    Write-Host 'Downloading Microsoft .NET Framework 4.7.1 Developer Pack...'
     
     $exePath = "$($env:USERPROFILE)\VSIsoShell.exe"
     
-    (New-Object Net.WebClient).DownloadFile('https://download.microsoft.com/download/E/F/D/EFD52638-B804-4865-BB57-47F4B9C80269/NDP462-DevPack-KB3151934-ENU.exe', $exePath)
+    (New-Object Net.WebClient).DownloadFile('https://download.microsoft.com/download/9/0/1/901B684B-659E-4CBD-BEC8-B3F06967C2E7/NDP471-DevPack-ENU.exe', $exePath)
     
-    Write-Host 'Installing Microsoft .NET Framework 4.6.2 Developer Pack...'
+    Write-Host 'Installing Microsoft .NET Framework 4.7.1 Developer Pack...'
     
     cmd /c start /wait "$exePath" /q /norestart
+    
+    Write-Host 'Downloading Installing vera++1.3.0-win32...'
+    
+    $exePath = "$($env:USERPROFILE)\vera++-1.3.0-win32.exe"
+    
+    (New-Object Net.WebClient).DownloadFile('https://bitbucket.org/verateam/vera/downloads/vera++-1.3.0-win32.exe', $exePath)
+    
+    Write-Host 'Installing vera++1.3.0-win32...'
+    
+    cmd /c start /wait "$exePath" /S
+    
 before_build:
-- appveyor-retry dotnet restore .\main\OpenCover.Simple.Target.Core -v Minimal
+- ps: >-
+    #do nothing
 build_script:
 - ps: >-
     if ($env:APPVEYOR_SCHEDULED_BUILD -eq "True" -or $env:APPVEYOR_REPO_BRANCH -eq "coverity") {
@@ -60,6 +70,10 @@ artifacts:
   name: ChocolateyPortable
 - path: cov-int/build-log.txt
   name: Coverity
+- path: GenericCoverage.xml
+  name: cpp-coverage
+- path: main/bin/release/opencovertests.xml
+  name: cs-coverage
 deploy:
 - provider: NuGet
   api_key:
@@ -125,11 +139,12 @@ on_success:
 - ps: >-
     if ($env:APPVEYOR_SCHEDULED_BUILD -ne "True" -and $env:APPVEYOR_REPO_BRANCH -ne "coverity")
     {
-      if (-Not $env:APPVEYOR_PULL_REQUEST_NUMBER) {
-        & .\build.bat sonarqube-build
-      } else {
-        & .\build.bat dogfood-release
-      }
+    #  if (-Not $env:APPVEYOR_PULL_REQUEST_NUMBER) {
+    #    & .\build.bat sonarqube-build
+    #  } else {
+    #    & .\build.bat dogfood-release
+    #  }
+       & .\build.bat dogfood-release
     }
 on_finish:
   - ps: #$blockRdp = $true; iex ((new-object net.webclient).DownloadString('https://raw.githubusercontent.com/appveyor/ci/master/scripts/enable-rdp.ps1'))

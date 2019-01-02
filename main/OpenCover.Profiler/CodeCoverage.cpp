@@ -33,7 +33,7 @@ void GetVersion(LPTSTR szVersionFile, DWORD *dwVersionHigh, DWORD *dwVersionLow)
 	{
 		auto verData = new BYTE[verSize];
 
-		if (GetFileVersionInfo(szVersionFile, verHandle, verSize, verData))
+		if (GetFileVersionInfo(szVersionFile, 0, verSize, verData))
 		{
 			if (VerQueryValue(verData, _T("\\"), (VOID FAR* FAR*)&verInfo, &size))
 			{
@@ -58,11 +58,12 @@ void GetVersion(LPTSTR szVersionFile, DWORD *dwVersionHigh, DWORD *dwVersionLow)
 	}
 }
 
+#pragma warning (suppress : 6262) // Function uses '17528' bytes of stack; heap not wanted
 HRESULT CCodeCoverage::OpenCoverInitialise(IUnknown *pICorProfilerInfoUnk){
 	ATLTRACE(_T("::OpenCoverInitialise"));
 
     OLECHAR szGuid[40]={0};
-    ::StringFromGUID2(CLSID_CodeCoverage, szGuid, 40);
+    (void) ::StringFromGUID2(CLSID_CodeCoverage, szGuid, 40);
     RELTRACE(L"    ::Initialize(...) => CLSID == %s", szGuid);
     //::OutputDebugStringW(szGuid);
 
@@ -85,9 +86,7 @@ HRESULT CCodeCoverage::OpenCoverInitialise(IUnknown *pICorProfilerInfoUnk){
     if (m_profilerInfo2 != nullptr) ATLTRACE(_T("    ::Initialize (m_profilerInfo2 OK)"));
     if (m_profilerInfo2 == nullptr) return E_FAIL;
     m_profilerInfo3 = pICorProfilerInfoUnk;
-#ifndef _TOOLSETV71
     m_profilerInfo4 = pICorProfilerInfoUnk;
-#endif
 
     ZeroMemory(&m_runtimeVersion, sizeof(m_runtimeVersion));
     if (m_profilerInfo3 != nullptr) 
@@ -154,7 +153,10 @@ HRESULT CCodeCoverage::OpenCoverInitialise(IUnknown *pICorProfilerInfoUnk){
 
     _host = std::make_shared<Communication::ProfilerCommunication>(_shortwait, dwVersionHigh, dwVersionLow);
 
-    if (!_host->Initialise(key, ns, szExeName))
+	int sendVisitPointsTimerInterval = getSendVisitPointsTimerInterval();
+
+	if (!_host->Initialise(key, ns, szExeName,
+		safe_mode_, sendVisitPointsTimerInterval))
     {
         RELTRACE(_T("    ::Initialize => Profiler will not run for this process."));
         return E_FAIL;
@@ -162,7 +164,7 @@ HRESULT CCodeCoverage::OpenCoverInitialise(IUnknown *pICorProfilerInfoUnk){
 
     OpenCoverSupportInitialize(pICorProfilerInfoUnk);
 
-	if (m_chainedProfiler == nullptr){
+	if (!IsChainedProfilerHooked()){
 		DWORD dwMask = AppendProfilerEventMask(0); 
 
 		COM_FAIL_MSG_RETURN_ERROR(m_profilerInfo2->SetEventMask(dwMask),
@@ -182,12 +184,11 @@ HRESULT CCodeCoverage::OpenCoverInitialise(IUnknown *pICorProfilerInfoUnk){
 
     g_pProfiler = this;
 
-#ifndef _TOOLSETV71
     COM_FAIL_MSG_RETURN_ERROR(m_profilerInfo2->SetEnterLeaveFunctionHooks2(
         _FunctionEnter2, _FunctionLeave2, _FunctionTailcall2), 
         _T("    ::Initialize(...) => SetEnterLeaveFunctionHooks2 => 0x%X"));
-#endif
-    RELTRACE(_T("::Initialize - Done!"));
+
+	RELTRACE(_T("::Initialize - Done!"));
     
     return S_OK; 
 }
@@ -207,13 +208,11 @@ DWORD CCodeCoverage::AppendProfilerEventMask(DWORD currentEventMask)
 	if (m_useOldStyle)
 		dwMask |= COR_PRF_DISABLE_TRANSPARENCY_CHECKS_UNDER_FULL_TRUST;      // Disables security transparency checks that are normally done during just-in-time (JIT) compilation and class loading for full-trust assemblies. This can make some instrumentation easier to perform.
 
-#ifndef _TOOLSETV71
 	if (m_profilerInfo4 != nullptr)
 	{
 		ATLTRACE(_T("    ::Initialize (m_profilerInfo4 OK)"));
 		dwMask |= COR_PRF_DISABLE_ALL_NGEN_IMAGES;
 	}
-#endif
 
     dwMask |= COR_PRF_MONITOR_THREADS;
 
@@ -225,19 +224,20 @@ HRESULT STDMETHODCALLTYPE CCodeCoverage::Shutdown( void)
 { 
     RELTRACE(_T("::Shutdown - Starting"));
 
-    if (m_chainedProfiler != nullptr)
-		m_chainedProfiler->Shutdown();
+	return ChainCall([&]() {return CProfilerBase::Shutdown(); }, 
+		[&]()
+	{
+		if (chained_module_ != nullptr)
+			FreeLibrary(chained_module_);
 
-    if (chained_module_ != nullptr)
-        FreeLibrary(chained_module_);
+		_host->CloseChannel(safe_mode_);
 
-    _host->CloseChannel(safe_mode_);
-
-    WCHAR szExeName[MAX_PATH];
-    GetModuleFileNameW(nullptr, szExeName, MAX_PATH);
-    RELTRACE(_T("::Shutdown - Nothing left to do but return S_OK(%s)"), szExeName);
-    g_pProfiler = nullptr;
-    return S_OK; 
+		WCHAR szExeName[MAX_PATH];
+		GetModuleFileNameW(nullptr, szExeName, MAX_PATH);
+		RELTRACE(_T("::Shutdown - Nothing left to do but return S_OK(%s)"), W2CT(szExeName));
+		g_pProfiler = nullptr;
+		return S_OK;
+	});
 }
 
 /// <summary>An unmanaged callback that can be called from .NET that has a single I4 parameter</summary>
@@ -280,10 +280,9 @@ HRESULT STDMETHODCALLTYPE CCodeCoverage::ModuleLoadFinished(
 	/* [in] */ ModuleID moduleId,
 	/* [in] */ HRESULT hrStatus)
 {
-	if (m_chainedProfiler != nullptr)
-		m_chainedProfiler->ModuleLoadFinished(moduleId, hrStatus);
 
-	return RegisterCuckoos(moduleId);
+	return ChainCall([&]() { return CProfilerBase::ModuleLoadFinished(moduleId, hrStatus); },
+		[&]() { return RegisterCuckoos(moduleId); });
 }
 
 /// <summary>Handle <c>ICorProfilerCallback::ModuleAttachedToAssembly</c></summary>
@@ -293,29 +292,29 @@ HRESULT STDMETHODCALLTYPE CCodeCoverage::ModuleAttachedToAssembly(
     /* [in] */ ModuleID moduleId,
     /* [in] */ AssemblyID assemblyId)
 {
-	if (m_chainedProfiler != nullptr)
-		m_chainedProfiler->ModuleAttachedToAssembly(moduleId, assemblyId);
+	return ChainCall([&]() { return CProfilerBase::ModuleAttachedToAssembly(moduleId, assemblyId); }, 
+		[&]() {
+		std::wstring modulePath = GetModulePath(moduleId);
+		std::wstring assemblyName = GetAssemblyName(assemblyId);
+		/*ATLTRACE(_T("::ModuleAttachedToAssembly(...) => (%X => %s, %X => %s)"),
+		moduleId, W2CT(modulePath.c_str()),
+		assemblyId, W2CT(assemblyName.c_str()));*/
+		m_allowModules[modulePath] = _host->TrackAssembly(const_cast<LPWSTR>(modulePath.c_str()), const_cast<LPWSTR>(assemblyName.c_str()));
+		m_allowModulesAssemblyMap[modulePath] = assemblyName;
 
-    std::wstring modulePath = GetModulePath(moduleId);
-    std::wstring assemblyName = GetAssemblyName(assemblyId);
-    /*ATLTRACE(_T("::ModuleAttachedToAssembly(...) => (%X => %s, %X => %s)"), 
-        moduleId, W2CT(modulePath.c_str()), 
-        assemblyId, W2CT(assemblyName.c_str()));*/
-    m_allowModules[modulePath] = _host->TrackAssembly(const_cast<LPWSTR>(modulePath.c_str()), const_cast<LPWSTR>(assemblyName.c_str()));
-    m_allowModulesAssemblyMap[modulePath] = assemblyName;
+		if (m_allowModules[modulePath]) {
+			ATLTRACE(_T("::ModuleAttachedToAssembly(...) => (%X => %s, %X => %s)"),
+				moduleId, W2CT(modulePath.c_str()),
+				assemblyId, W2CT(assemblyName.c_str()));
+		}
 
-    if (m_allowModules[modulePath]){
-        ATLTRACE(_T("::ModuleAttachedToAssembly(...) => (%X => %s, %X => %s)"),
-            moduleId, W2CT(modulePath.c_str()),
-            assemblyId, W2CT(assemblyName.c_str()));
-    }
+		if (MSCORLIB_NAME == assemblyName || DNCORLIB_NAME == assemblyName) {
+			cuckoo_module_ = assemblyName;
+			RELTRACE(_T("cuckoo nest => %s"), W2CT(cuckoo_module_.c_str()));
+		}
 
-	if (MSCORLIB_NAME == assemblyName || DNCORLIB_NAME == assemblyName) {
-		cuckoo_module_ = assemblyName;
-		RELTRACE(_T("cuckoo => %s"), cuckoo_module_.c_str());
-	}
-
-	return S_OK; 
+		return S_OK;
+	});
 }
 
 /// <summary>Handle <c>ICorProfilerCallback::JITCompilationStarted</c></summary>
@@ -409,10 +408,7 @@ HRESULT STDMETHODCALLTYPE CCodeCoverage::JITCompilationStarted(
         }
     }
     
-    if (m_chainedProfiler != nullptr)
-        return m_chainedProfiler->JITCompilationStarted(functionId, fIsSafeToBlock);
-
-    return S_OK; 
+    return CProfilerBase::JITCompilationStarted(functionId, fIsSafeToBlock); 
 }
 
 ipv CCodeCoverage::GetInstrumentPointVisit(){
@@ -488,4 +484,15 @@ HRESULT CCodeCoverage::InstrumentMethodWith(ModuleID moduleId, mdToken functionT
 		_T("    ::InstrumentMethodWith(...) => SetILFunctionBody => 0x%X"));
 
     return S_OK;
+}
+
+int CCodeCoverage::getSendVisitPointsTimerInterval()
+{
+	int timerIntervalValue = 0;
+	TCHAR timerIntervalString[1024] = { 0 };
+	if (::GetEnvironmentVariable(_T("OpenCover_SendVisitPointsTimerInterval"), timerIntervalString, 1024) > 0) {
+		timerIntervalValue = _tcstoul(timerIntervalString, nullptr, 10);
+		ATLTRACE(_T("    ::Initialize(...) => sendVisitPointsTimerInterval = %d"), timerIntervalValue);
+	}
+	return timerIntervalValue;
 }

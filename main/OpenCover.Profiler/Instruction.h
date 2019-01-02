@@ -20,9 +20,9 @@ namespace Instrumentation {
 	{
 	public:
 		Instruction(CanonicalName operation, ULONGLONG operand);
-		Instruction(CanonicalName operation);
-		~Instruction(){};
-	protected:
+		explicit Instruction(CanonicalName operation);
+
+		protected:
 		Instruction();
 		Instruction& operator = (const Instruction& b);
 		bool Equivalent(const Instruction& b);
