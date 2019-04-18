@@ -61,17 +61,23 @@ Please refer to the wiki - [Silverlight support](https://github.com/OpenCover/op
 ### Building
 You will need:
 
-1. Visual Studio VS2017 (Community Edition) or later with C#, C++, .Net Core
-2. WiX 3.11 or later (http://wixtoolset.org/releases/) and Votive 2017 (https://marketplace.visualstudio.com/items?itemName=RobMensching.WixToolsetVisualStudio2017Extension)
-3. SpecFlow for Visual Studio 2017 (https://marketplace.visualstudio.com/items?itemName=TechTalkSpecFlowTeam.SpecFlowforVisualStudio2017)
-4. Windows SDK 10 and .NET Framework Tools (https://msdn.microsoft.com/en-us/windows/desktop/bg162891.aspx)
-5. Microsoft .NET Framework 4.7.2 Developer Pack (https://dotnet.microsoft.com/download/visual-studio-sdks)
+To build from the command line:
+1. Visual Studio VS2019 (Community Edition - https://visualstudio.microsoft.com/vs/community/)  
+- .Net Desktop Development), 
+- Desktop Development with C++ 
+- .Net Core Cross Platform
+2. .Net Core 2.2 SDK (https://dotnet.microsoft.com/download)
+2. WiX 3.11 or later (http://wixtoolset.org/releases/) 
+
+To build and run in Visual Studio (only try after getting a command line build to work):
+1. and Votive 2017 (https://marketplace.visualstudio.com/items?itemName=RobMensching.WixToolsetVisualStudio2017Extension)
+2. SpecFlow for Visual Studio 2017 (https://marketplace.visualstudio.com/items?itemName=TechTalkSpecFlowTeam.SpecFlowforVisualStudio2017)
 
 All other software should be included with this repository.
 
 NANT scripts (encapsulated by the build.bat file) are used to build the project outside visual studio and will run all unit tests.
 
-To build the code in 32-bit Debug mode just run Build in the root of the project folder.
+To build the code in Debug mode just run `Build`, using Developer Command Prompt for VS2019, in the root of the project folder.
 
 To build a release package including installer, zip and nuget packages use
 
